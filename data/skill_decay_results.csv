@@ -1,0 +1,10 @@
+skill,salary_growth_rate,demand_velocity,decay_index,classification
+Python,-14.29,1.78,0.64,DECLINING
+Azure,0.0,1.0,0.62,DECLINING
+Spark,3.74,1.0,0.6,DECLINING
+Scala,3.74,1.0,0.6,DECLINING
+NLP,202.98,2.0,0.24,STABLE
+MLOps,21.4,40.0,0.17,RISING
+Deep Learning,121.49,4.5,0.04,RISING
+Power BI,46.65,143.0,0.02,RISING
+Computer Vision,183.33,58.0,0.0,RISING
