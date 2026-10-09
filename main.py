@@ -15,7 +15,7 @@ def main():
         'employment_type_label', 'work_mode', 'salary_outlier_flag', 'label',
         'role_family', 'isco_group_hint'
     ]
-    df = pd.read_csv('data/ai_jobs_salaries_clean.csv', names=column_names)
+    df = pd.read_csv('data/Initial data/ai_jobs_salaries_clean.csv', names=column_names)
 
     # Конвертация в числовые типы
     df['salary_in_usd'] = pd.to_numeric(df['salary_in_usd'], errors='coerce')
