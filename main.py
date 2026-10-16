@@ -1,3 +1,14 @@
+# =============================================================================
+# Модуль: main.py
+# Назначение: Точка входа в аналитическую платформу Skill Decay Monitor.
+#             Организует последовательный пайплайн: загрузка датасета,
+#             извлечение технических навыков и расчет метрик устаревания.
+# Входные данные: data/Initial data/ai_jobs_salaries_clean.csv (72k+ записей)
+# Выходные данные: data/results/skill_decay_results.csv (метрики SGR, DV, DI)
+# Зависимости: pandas, SkillExtractor, MetricsCalculator
+# Автор: Мешков Артём | Дата: 2026 | Версия: 0.3.0
+# =============================================================================
+
 import pandas as pd
 from src.analytics.skill_extractor import SkillExtractor #импорт класса манипуляций с колонками
 from src.analytics.metrics_calculator import MetricsCalculator #рассчитывание метрик импорт тоже
@@ -43,8 +54,8 @@ def main():
         print(rising.to_string(index=False))
     else:
         print("Нет растущих навыков в данных")
-    results.to_csv('data/skill_decay_results.csv', index=False) #сохраняем в виде csv и убираем мишуру также(номера строк)
-    print(f"\nРезультаты сохранены в data/skill_decay_results.csv")
+    results.to_csv('data/results/skill_decay_results.csv', index=False) #сохраняем в виде csv и убираем мишуру также(номера строк)
+    print(f"\nРезультаты сохранены в data/results/skill_decay_results.csv")
 
 
 if __name__ == "__main__":

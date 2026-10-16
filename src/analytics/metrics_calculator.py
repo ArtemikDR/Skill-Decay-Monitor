@@ -1,3 +1,13 @@
+# =============================================================================
+# Модуль: metrics_calculator.py
+# Назначение: Ядро аналитики. Рассчитывает количественные метрики устаревания
+#             навыков на основе исторических данных о вакансиях и зарплатах.
+# Ключевые метрики: Salary Growth Rate (SGR), Demand Velocity (DV), Decay Index (DI).
+# Классификация: RISING, STABLE, DECLINING, OBSOLETE.
+# Входные данные: DataFrame с колонками work_year, salary_in_usd, extracted_skills.
+# Выходные данные: DataFrame с итоговыми метриками и категориями навыков.
+# Автор: Мешков Артём | Дата: 2026 | Версия: 0.3.0
+# =============================================================================
 import pandas as pd
 import numpy as np
 from typing import Dict, List
@@ -91,6 +101,43 @@ class MetricsCalculator:
             return "DECLINING"
         else:
             return "OBSOLETE"
+    def get_skill_history(self, skill: str) -> Dict:
+        """
+        Возвращает полную историю навыка по годам:
+        медианная зарплата, количество вакансий, метрики и вердикт.
+        """
+        skill_data = self.df[self.df['extracted_skills'].apply(
+            lambda x: isinstance(x, list) and skill in x
+        )]
+
+        if len(skill_data) == 0:
+            return {"error": "Навык не найден в датасете"}
+
+        # Группировка по годам
+        yearly = skill_data.groupby('work_year').agg(
+            median_salary=('salary_in_usd', 'median'),
+            vacancy_count=('salary_in_usd', 'size')
+        ).reset_index().sort_values('work_year')
+
+        if len(yearly) < 2:
+            return {"error": "Недостаточно данных по годам (нужно минимум 2)"}
+
+        # Считаем метрики
+        sgr_data = self.calculate_salary_growth_rate(skill)
+        dv_data = self.calculate_demand_velocity(skill)
+        decay = self.calculate_decay_index(skill)
+
+        return {
+            "skill": skill,
+            "years": yearly['work_year'].tolist(),
+            "median_salaries": yearly['median_salary'].round(0).tolist(),
+            "vacancy_counts": yearly['vacancy_count'].tolist(),
+            "salary_growth_rate": sgr_data.get("salary_growth_rate"),
+            "demand_velocity": dv_data.get("demand_velocity"),
+            "decay_index": decay.get("decay_index"),
+            "classification": decay.get("classification"),
+            "total_vacancies": len(skill_data),
+        }
 
     def analyze_all_skills(self) -> pd.DataFrame: #анализирует все навыки и вернет датасет
         all_skills = set() #множество без дубликатов
