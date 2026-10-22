@@ -1,11 +1,20 @@
 # =============================================================================
 # Модуль: app.py
-# Назначение: Интерактивный веб-дашборд платформы Skill Decay Monitor.
-#             Визуализирует данные двух рынков: исторический (США, 2020-2026)
-#             и актуальный (РФ, hh.ru) с классификацией вакансий.
-# Функционал: Поиск навыков, графики динамики зарплат, вердикты перспективности.
-# Зависимости: streamlit, plotly, pandas, HHAnalyzer, MetricsCalculator
-# Автор: Мешков Артём | Дата: 2026 | Версия: 0.3.0
+# Назначение: Интерактивный веб-дашборд Skill Decay Monitor.
+#             Две вкладки: американский рынок (2020-2026) и российский (hh.ru).
+# Вкладки:
+#     1. Данные по датасету за американский рынок (2020-2026)
+#        — поиск навыка, график динамики, вердикт.
+#     2. Анализ профессий с hh.ru
+#        — поиск профессии, статистика, топ навыков, список вакансий.
+# Зависимости:
+#     streamlit, pandas, plotly,
+#     src.analytics.skill_extractor,
+#     src.analytics.metrics_calculator,
+#     src.analytics.hh_analyzer.
+# Автор: Оуджи буда
+# Дата: 2026
+# Версия: 2.0
 # =============================================================================
 
 import streamlit as st
@@ -32,16 +41,23 @@ st.markdown("Аналитическая платформа устаревани�
 # Две вкладки
 tab_us, tab_ru = st.tabs([
     "🇺🇸 Данные по датасету за американский рынок (2020-2026)",
-    "🇺 Анализ профессий с hh.ru"
+    "🇷 Анализ профессий с hh.ru"
 ])
 
-
-
+# ============================================================
+# ВКЛАДКА 1: АМЕРИКАНСКИЙ РЫНОК
+# ============================================================
 with tab_us:
     st.header("Американский рынок IT (2020–2026)")
 
+
     @st.cache_data
     def load_us_data():
+        """Загружает и обрабатывает американский датасет."""
+        if not US_DATASET.exists():
+            st.error(f"Файл не найден: {US_DATASET}")
+            return pd.DataFrame()
+
         column_names = [
             'work_year', 'experience_level', 'employment_type', 'job_title',
             'salary', 'salary_currency', 'salary_in_usd', 'employee_residence',
@@ -49,12 +65,17 @@ with tab_us:
             'experience_level_label', 'employment_type_label', 'work_mode',
             'salary_outlier_flag', 'label', 'role_family', 'isco_group_hint'
         ]
-        df = pd.read_csv(US_DATASET, names=column_names)
+        df = pd.read_csv(US_DATASET, names=column_names, low_memory=False)
         df['salary_in_usd'] = pd.to_numeric(df['salary_in_usd'], errors='coerce')
         df['work_year'] = pd.to_numeric(df['work_year'], errors='coerce')
         df = df.dropna(subset=['salary_in_usd'])
-        df = SkillExtractor().process_dataframe(df)
+
+        # Извлекаем навыки
+        extractor = SkillExtractor()
+        df = extractor.process_dataframe(df)
+
         return df
+
 
     df_us = load_us_data()
 
@@ -73,9 +94,9 @@ with tab_us:
         col1.metric("Всего вакансий", f"{len(df_us):,}")
         col2.metric("Уникальных навыков", len(all_skills_us))
         col3.metric("Период",
-                     f"{int(df_us['work_year'].min())}–{int(df_us['work_year'].max())}")
+                    f"{int(df_us['work_year'].min())}–{int(df_us['work_year'].max())}")
         col4.metric("Медианная ЗП",
-                     f"${int(df_us['salary_in_usd'].median()):,}")
+                    f"${int(df_us['salary_in_usd'].median()):,}")
 
         st.markdown("---")
 
@@ -154,18 +175,17 @@ with tab_us:
                 hide_index=True
             )
 
+# ============================================================
+# ВКЛАДКА 2: РОССИЙСКИЙ РЫНОК (hh.ru)
+# ============================================================
 with tab_ru:
-    st.header("Российский рынок IT (hh.ru, актуальные данные)")
+    st.header("🇷 Российский рынок IT (hh.ru, актуальные данные)")
 
 
-    @st.cache_data
+    @st.cache_resource
     def load_ru_analyzer():
-        # Загружаем данные об устаревании навыков из американского датасета
-        us_results_path = PROJECT_ROOT / 'data' / 'results' / 'skill_decay_results.csv'
-        us_decay_data = None
-        if us_results_path.exists():
-            us_decay_data = pd.read_csv(us_results_path)
-        return HHAnalyzer(us_decay_data=us_decay_data)
+        """Загружает анализатор hh.ru."""
+        return HHAnalyzer()
 
 
     hh = load_ru_analyzer()
@@ -185,105 +205,109 @@ with tab_ru:
 
         st.markdown("---")
 
-        # Поиск
+        # Поиск профессии
         query_ru = st.text_input(
             "Введите профессию или навык:",
-            placeholder="Data Scientist, Python, DevOps, 1C, Flutter..."
+            placeholder="Python разработчик, Data Scientist, DevOps, 1C, Flutter..."
         )
 
-        if st.button("Найти (hh.ru)", type="primary") and query_ru:
-            result = hh.search(query_ru)
+        if st.button(" Анализировать профессию", type="primary") and query_ru:
+            with st.spinner(f"Анализируем '{query_ru}' на hh.ru..."):
+                result = hh.analyze_profession_with_verdict(query_ru)
 
             if "error" in result:
                 st.error(result["error"])
             else:
-                st.subheader(f"Результаты по запросу «{query_ru}»")
+                # === ВЕРДИКТ ===
+                st.subheader(f"Результаты анализа: «{result['query']}»")
 
-                sc1, sc2, sc3 = st.columns(3)
-                sc1.metric("Найдено вакансий", result["total_found"])
-                sc2.metric("Медианная зарплата",
-                           f"{result['median_salary_rub']:,} ₽"
-                           if result['median_salary_rub']
-                           else "не указана")
-                sc3.metric("Уникальных навыков", len(result["top_skills"]))
+                cls = result['classification']
+                labels = {
+                    'RISING': '🟢 Перспективная (RISING)',
+                    'STABLE': '🔵 Стабильная (STABLE)',
+                    'DECLINING': '🟠 Угасающая (DECLINING)',
+                    'OBSOLETE': '🔴 Устаревшая (OBSOLETE)',
+                    'UNKNOWN': '⚪ Не определено (недостаточно данных)'
+                }
 
-                # Распределение по классификации
-                if result.get("classification_distribution"):
-                    st.subheader("Перспективность найденных вакансий")
-                    cls_labels = {
-                        'RISING': '🟢 Растущие',
-                        'STABLE': '🔵 Стабильные',
-                        'DECLINING': '🟠 Угасающие',
-                        'OBSOLETE': '🔴 Устаревшие',
-                        'UNKNOWN': '⚪ Не определено'
-                    }
-                    cls_colors = {
-                        'RISING': '#2ecc71',
-                        'STABLE': '#3498db',
-                        'DECLINING': '#e67e22',
-                        'OBSOLETE': '#e74c3c',
-                        'UNKNOWN': '#95a5a6'
-                    }
-                    fig_cls = go.Figure(data=[go.Pie(
-                        labels=[cls_labels.get(k, k) for k in result["classification_distribution"].keys()],
-                        values=list(result["classification_distribution"].values()),
-                        marker_colors=[cls_colors.get(k, '#95a5a6')
-                                       for k in result["classification_distribution"].keys()]
+                # Большая карточка с вердиктом
+                st.markdown(f"### {labels.get(cls, cls)}")
+                if result['avg_decay_index'] is not None:
+                    st.metric("Средний Decay Index", f"{result['avg_decay_index']:.3f}")
+                st.metric("Найдено вакансий", result['total_found'])
+                st.metric("Медианная зарплата",
+                          f"{result['median_salary']:,} ₽"
+                          if result['median_salary'] else "не указана")
+
+                st.markdown("---")
+
+                # === ТОП НАВЫКОВ С DECAY INDEX ===
+                if result['top_skills']:
+                    st.subheader("📊 Топ навыков в профессии")
+
+                    # Создаём DataFrame для таблицы
+                    skills_df = pd.DataFrame(result['top_skills'])
+                    skills_df.columns = ['Навык', 'Упоминаний', 'Decay Index']
+
+
+                    # Форматируем Decay Index
+                    def format_decay(val):
+                        if val is None:
+                            return 'N/A'
+                        if val < 0.3:
+                            return f"🟢 {val:.3f}"
+                        elif val < 0.5:
+                            return f"🔵 {val:.3f}"
+                        elif val < 0.7:
+                            return f"🟠 {val:.3f}"
+                        else:
+                            return f" {val:.3f}"
+
+
+                    skills_df['Decay Index'] = skills_df['Decay Index'].apply(format_decay)
+
+                    st.dataframe(skills_df, use_container_width=True, hide_index=True)
+
+                    # График топ навыков
+                    fig_skills = go.Figure(data=[go.Bar(
+                        x=skills_df['Упоминаний'].values,
+                        y=skills_df['Навык'].values,
+                        orientation='h',
+                        marker_color='royalblue'
                     )])
-                    fig_cls.update_layout(title="Распределение по перспективности", height=350)
-                    st.plotly_chart(fig_cls, use_container_width=True)
-
-                col_exp, col_sal = st.columns(2)
-                with col_exp:
-                    if result["experience_distribution"]:
-                        fig_exp = go.Figure(data=[go.Pie(
-                            labels=list(result["experience_distribution"].keys()),
-                            values=list(result["experience_distribution"].values())
-                        )])
-                        fig_exp.update_layout(title="Распределение по опыту", height=350)
-                        st.plotly_chart(fig_exp, use_container_width=True)
-
-                with col_sal:
-                    if result["top_skills"]:
-                        fig_skills = go.Figure(data=[go.Bar(
-                            x=list(result["top_skills"].values()),
-                            y=list(result["top_skills"].keys()),
-                            orientation='h',
-                            marker_color='royalblue'
-                        )])
-                        fig_skills.update_layout(
-                            title="Топ навыков в найденных вакансиях",
-                            xaxis_title="Количество упоминаний",
-                            height=350
-                        )
-                        st.plotly_chart(fig_skills, use_container_width=True)
-
-                # Таблица вакансий с классификацией
-                st.subheader("Список вакансий")
-                if result["vacancies"]:
-                    df_vac = pd.DataFrame(result["vacancies"])
-
-                    # Добавляем эмодзи для классификации
-                    cls_emoji = {
-                        'RISING': '🟢 Растущая',
-                        'STABLE': '🔵 Стабильная',
-                        'DECLINING': '🟠 Угасающая',
-                        'OBSOLETE': '🔴 Устаревшая',
-                        'UNKNOWN': '⚪ Не определено'
-                    }
-                    if 'classification' in df_vac.columns:
-                        df_vac['classification'] = df_vac['classification'].map(
-                            lambda x: cls_emoji.get(x, x)
-                        )
-
-                    st.dataframe(
-                        df_vac.head(50),
-                        use_container_width=True,
-                        hide_index=True
+                    fig_skills.update_layout(
+                        title="Частота упоминания навыков в вакансиях",
+                        xaxis_title="Количество упоминаний",
+                        height=400
                     )
+                    st.plotly_chart(fig_skills, use_container_width=True)
 
-        # Общий топ навыков
-        with st.expander("📊 Топ навыков по всему датасету hh.ru", expanded=False):
+                # === РАСПРЕДЕЛЕНИЕ ПО ОПЫТУ ===
+                if result['experience_distribution']:
+                    st.subheader("📈 Требуемый опыт работы")
+                    fig_exp = go.Figure(data=[go.Pie(
+                        labels=list(result['experience_distribution'].keys()),
+                        values=list(result['experience_distribution'].values())
+                    )])
+                    fig_exp.update_layout(
+                        title="Распределение вакансий по опыту",
+                        height=350
+                    )
+                    st.plotly_chart(fig_exp, use_container_width=True)
+
+                # === СПИСОК ВАКАНСИЙ ===
+                st.subheader("💼 Актуальные вакансии")
+                if result['vacancies']:
+                    df_vac = pd.DataFrame(result['vacancies'])
+                    # Форматируем зарплату
+                    if 'salary' in df_vac.columns:
+                        df_vac['salary'] = df_vac['salary'].apply(
+                            lambda x: f"{int(x):,} ₽" if pd.notna(x) else "—"
+                        )
+                    st.dataframe(df_vac, use_container_width=True, hide_index=True)
+
+        # === ОБЩИЙ ТОП НАВЫКОВ ПО ВСЕМУ ДАТАСЕТУ ===
+        with st.expander("📊 Топ навыков по всему рынку hh.ru", expanded=False):
             top_skills = hh.get_top_skills(n=20)
             fig_top = go.Figure(data=[go.Bar(
                 x=top_skills.values,
