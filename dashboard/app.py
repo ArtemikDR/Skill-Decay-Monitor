@@ -1,22 +1,3 @@
-# =============================================================================
-# Модуль: app.py
-# Назначение: Интерактивный веб-дашборд Skill Decay Monitor.
-#             Две вкладки: американский рынок (2020-2026) и российский (hh.ru).
-# Вкладки:
-#     1. Данные по датасету за американский рынок (2020-2026)
-#        — поиск навыка, график динамики, вердикт.
-#     2. Анализ профессий с hh.ru
-#        — поиск профессии, статистика, топ навыков, список вакансий.
-# Зависимости:
-#     streamlit, pandas, plotly,
-#     src.analytics.skill_extractor,
-#     src.analytics.metrics_calculator,
-#     src.analytics.hh_analyzer.
-# Автор: Оуджи буда
-# Дата: 2026
-# Версия: 2.0
-# =============================================================================
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -24,7 +5,44 @@ from pathlib import Path
 
 from src.analytics.skill_extractor import SkillExtractor
 from src.analytics.metrics_calculator import MetricsCalculator
+from src.parsers.hh_api_client import HHApiClient
 from src.analytics.hh_analyzer import HHAnalyzer
+
+# =============================================================================
+# ПАЛИТРА ТЁМНОЙ ТЕМЫ "Cyber Green"
+# =============================================================================
+BG_COLOR_DARK = "#16251c"  # RGB(22, 37, 28) - тёмно-зелёный
+CARD_COLOR_DARK = "#1a2f24"  # чуть светлее для карточек
+TEXT_COLOR_DARK = "#e0f2f1"  # яркий белый для тёмной темы
+ACCENT_CYAN = "#2dd4bf"  # неоново-бирюзовый (мягкий)
+RISING_COLOR = "#34d399"  # зелёный
+STABLE_COLOR = "#60a5fa"  # синий
+DECLINING_COLOR = "#fbbf24"  # оранжевый
+OBSOLETE_COLOR = "#f87171"  # красный
+
+# =============================================================================
+# ПАЛИТРА СВЕТЛОЙ ТЕМЫ
+# =============================================================================
+BG_COLOR_LIGHT = "#ffffff"
+CARD_COLOR_LIGHT = "#f8f9fa"
+TEXT_COLOR_LIGHT = "#212529"
+ACCENT_BLUE_LIGHT = "#0d6efd"
+
+# Инициализация состояния темы
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'dark'
+
+# Определяем текущую тему
+if st.session_state.theme == 'dark':
+    BG_COLOR = BG_COLOR_DARK
+    CARD_COLOR = CARD_COLOR_DARK
+    TEXT_COLOR = TEXT_COLOR_DARK
+    ACCENT_COLOR = ACCENT_CYAN
+else:
+    BG_COLOR = BG_COLOR_LIGHT
+    CARD_COLOR = CARD_COLOR_LIGHT
+    TEXT_COLOR = TEXT_COLOR_LIGHT
+    ACCENT_COLOR = ACCENT_BLUE_LIGHT
 
 st.set_page_config(
     page_title="Skill Decay Monitor",
@@ -32,28 +50,187 @@ st.set_page_config(
     page_icon="📉"
 )
 
+# =============================================================================
+# CSS СТИЛИ С ТЕМБЛЕРОМ И УЛУЧШЕНИЯМИ
+# =============================================================================
+st.markdown(f"""
+<style>
+    /* Основной фон */
+    .stApp {{
+        background-color: {BG_COLOR} !important;
+        color: {TEXT_COLOR} !important;
+        transition: all 0.3s ease;
+    }}
+
+    /* Скрываем header */
+    header[data-testid="stHeader"] {{
+        background-color: {BG_COLOR} !important;
+    }}
+
+    /* Тумблер темы */
+    .theme-toggle {{
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 9999;
+        background: {CARD_COLOR};
+        padding: 10px 20px;
+        border-radius: 25px;
+        border: 2px solid {ACCENT_COLOR};
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }}
+
+    /* Кнопки */
+    .stButton>button {{
+        background-color: {ACCENT_COLOR};
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+        font-size: 16px;
+        transition: all 0.3s ease;
+    }}
+    .stButton>button:hover {{
+        transform: scale(1.05);
+        box-shadow: 0 0 20px {ACCENT_COLOR};
+    }}
+
+    /* Поисковая строка с RGB-анимацией */
+    .stTextInput>div>div>input {{
+        background-color: {CARD_COLOR};
+        color: {TEXT_COLOR};
+        border: 2px solid {ACCENT_COLOR};
+        border-radius: 10px;
+        padding: 12px;
+        font-size: 16px;
+        animation: rgb-border 3s infinite;
+    }}
+
+    @keyframes rgb-border {{
+        0% {{ border-color: #34d399; box-shadow: 0 0 10px rgba(52, 211, 153, 0.5); }}
+        33% {{ border-color: #2dd4bf; box-shadow: 0 0 10px rgba(45, 212, 191, 0.5); }}
+        66% {{ border-color: #60a5fa; box-shadow: 0 0 10px rgba(96, 165, 250, 0.5); }}
+        100% {{ border-color: #34d399; box-shadow: 0 0 10px rgba(52, 211, 153, 0.5); }}
+    }}
+
+    /* Метрики */
+    .stMetric {{
+        background-color: {CARD_COLOR};
+        padding: 1.5rem;
+        border-radius: 12px;
+        border-left: 5px solid {ACCENT_COLOR};
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }}
+    .stMetric label {{
+        color: {TEXT_COLOR} !important;
+        font-weight: 600;
+    }}
+    .stMetric div[data-testid="stMetricValue"] {{
+        color: {ACCENT_COLOR} !important;
+    }}
+
+    /* Заголовки */
+    h1, h2, h3, h4, h5, h6 {{
+        color: {TEXT_COLOR} !important;
+        font-weight: 700;
+    }}
+
+    /* Вкладки */
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 10px;
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        background-color: {CARD_COLOR};
+        color: {TEXT_COLOR};
+        border-radius: 8px;
+        padding: 12px 24px;
+        font-weight: 600;
+        border: 2px solid transparent;
+    }}
+    .stTabs [aria-selected="true"] {{
+        background-color: {ACCENT_COLOR};
+        color: white;
+        border-color: {ACCENT_COLOR};
+    }}
+
+    /* Таблицы - НЕОНОВО-БИРЮЗОВЫЕ */
+    .dataframe {{
+        color: {TEXT_COLOR} !important;
+        background-color: {CARD_COLOR} !important;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 15px rgba(45, 212, 191, 0.2);
+    }}
+    .dataframe th {{
+        background-color: {ACCENT_COLOR} !important;
+        color: white !important;
+        font-weight: 700;
+        padding: 12px;
+        border: none;
+    }}
+    .dataframe td {{
+        background-color: {CARD_COLOR} !important;
+        color: {TEXT_COLOR} !important;
+        padding: 10px;
+        border-bottom: 1px solid rgba(45, 212, 191, 0.2);
+    }}
+    .dataframe tr:hover td {{
+        background-color: rgba(45, 212, 191, 0.1) !important;
+    }}
+
+    /* Pie chart legend - делаем ярче */
+    .legend text {{
+        fill: {TEXT_COLOR} !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Expander */
+    .streamlit-expanderHeader {{
+        background-color: {CARD_COLOR};
+        color: {TEXT_COLOR};
+        border-radius: 8px;
+        border: 1px solid {ACCENT_COLOR};
+    }}
+
+    /* Spinner */
+    .stSpinner {{
+        color: {ACCENT_COLOR};
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# =============================================================================
+# ТЕМБЛЕР ПЕРЕКЛЮЧЕНИЯ ТЕМ
+# =============================================================================
+col_toggle1, col_toggle2 = st.columns([10, 1])
+with col_toggle2:
+    theme_icon = "🌙" if st.session_state.theme == 'dark' else "☀️"
+    if st.button(f"{theme_icon}", key="theme_toggle", help="Переключить тему"):
+        st.session_state.theme = 'light' if st.session_state.theme == 'dark' else 'dark'
+        st.rerun()
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 US_DATASET = PROJECT_ROOT / 'data' / 'Initial data' / 'ai_jobs_salaries_clean.csv'
 
-st.title("📉 Skill Decay Monitor")
-st.markdown("Аналитическая платформа устаревания и роста навыков")
+st.title(" Skill Decay Monitor")
+st.markdown("### Аналитическая платформа устаревания и роста навыков")
 
-# Две вкладки
 tab_us, tab_ru = st.tabs([
-    "🇺🇸 Данные по датасету за американский рынок (2020-2026)",
-    "🇷 Анализ профессий с hh.ru"
+    "🇺🇸 Американский рынок (2020-2026)",
+    "🇷🇺 Российский рынок (hh.ru API)"
 ])
 
-# ============================================================
+# =============================================================================
 # ВКЛАДКА 1: АМЕРИКАНСКИЙ РЫНОК
-# ============================================================
+# =============================================================================
 with tab_us:
     st.header("Американский рынок IT (2020–2026)")
 
 
     @st.cache_data
     def load_us_data():
-        """Загружает и обрабатывает американский датасет."""
         if not US_DATASET.exists():
             st.error(f"Файл не найден: {US_DATASET}")
             return pd.DataFrame()
@@ -70,7 +247,6 @@ with tab_us:
         df['work_year'] = pd.to_numeric(df['work_year'], errors='coerce')
         df = df.dropna(subset=['salary_in_usd'])
 
-        # Извлекаем навыки
         extractor = SkillExtractor()
         df = extractor.process_dataframe(df)
 
@@ -84,7 +260,6 @@ with tab_us:
     else:
         calc_us = MetricsCalculator(df_us)
 
-        # KPI
         all_skills_us = set()
         for s in df_us['extracted_skills']:
             if isinstance(s, list):
@@ -100,7 +275,6 @@ with tab_us:
 
         st.markdown("---")
 
-        # Поиск навыка
         query_us = st.text_input(
             "Введите навык или профессию:",
             placeholder="Python, Hadoop, MLOps, Data Scientist..."
@@ -112,7 +286,7 @@ with tab_us:
             if matches:
                 query_us = st.selectbox("Выберите из найденных:", matches)
 
-        if st.button("Проанализировать (US)", type="primary") and query_us:
+        if st.button("🔍 Проанализировать (US)", type="primary") and query_us:
             history = calc_us.get_skill_history(query_us)
 
             if "error" in history:
@@ -135,35 +309,37 @@ with tab_us:
                 c4.metric("Decay Index",
                           f"{history['decay_index']:.2f}")
 
-                # График
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=history["years"],
                     y=history["median_salaries"],
                     mode="lines+markers",
                     name="Зарплата, USD",
-                    line=dict(color="royalblue", width=3),
+                    line=dict(color=ACCENT_COLOR, width=3),
+                    marker=dict(size=10, color=ACCENT_COLOR),
                     yaxis="y1"
                 ))
                 fig.add_trace(go.Bar(
                     x=history["years"],
                     y=history["vacancy_counts"],
                     name="Кол-во вакансий",
-                    marker_color="rgba(255,165,0,0.6)",
+                    marker_color="rgba(251, 191, 36, 0.6)",
                     yaxis="y2"
                 ))
                 fig.update_layout(
                     title=f"Динамика навыка «{query_us}» (US)",
-                    xaxis=dict(title="Год", dtick=1),
-                    yaxis=dict(title="Зарплата, USD", side="left"),
+                    xaxis=dict(title="Год", dtick=1, color=TEXT_COLOR),
+                    yaxis=dict(title="Зарплата, USD", side="left", color=TEXT_COLOR),
                     yaxis2=dict(title="Кол-во вакансий",
-                                side="right", overlaying="y"),
-                    template="plotly_white",
-                    height=450
+                                side="right", overlaying="y", color=TEXT_COLOR),
+                    template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                    height=450,
+                    paper_bgcolor=BG_COLOR,
+                    plot_bgcolor=CARD_COLOR,
+                    font=dict(color=TEXT_COLOR, size=12)
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-        # Общий рейтинг
         with st.expander("📊 Общий рейтинг навыков (US)", expanded=False):
             results_us = calc_us.analyze_all_skills()
             st.dataframe(
@@ -175,149 +351,124 @@ with tab_us:
                 hide_index=True
             )
 
-# ============================================================
-# ВКЛАДКА 2: РОССИЙСКИЙ РЫНОК (hh.ru)
-# ============================================================
+# =============================================================================
+# ВКЛАДКА 2: РОССИЙСКИЙ РЫНОК (hh.ru API)
+# =============================================================================
 with tab_ru:
-    st.header("🇷 Российский рынок IT (hh.ru, актуальные данные)")
+    st.header("🇷🇺 Российский рынок IT (hh.ru API)")
 
 
     @st.cache_resource
     def load_ru_analyzer():
-        """Загружает анализатор hh.ru."""
         return HHAnalyzer()
 
 
-    hh = load_ru_analyzer()
-
-    if hh.df.empty:
-        st.error("Файл hh_vacancies_cleaned.csv не найден")
-        st.info("Положите файл в data/Initial data/")
-    else:
-        # KPI
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Всего вакансий", len(hh.df))
-        c2.metric("С указанием ЗП", hh.df['salary'].notna().sum())
-        c3.metric("Медианная ЗП",
-                  f"{int(hh.df['salary'].median()):,} ₽"
-                  if hh.df['salary'].notna().any() else "—")
-        c4.metric("Уникальных навыков", len(hh.get_top_skills(n=1000)))
-
-        st.markdown("---")
-
-        # Поиск профессии
-        query_ru = st.text_input(
-            "Введите профессию или навык:",
-            placeholder="Python разработчик, Data Scientist, DevOps, 1C, Flutter..."
-        )
-
-        if st.button(" Анализировать профессию", type="primary") and query_ru:
-            with st.spinner(f"Анализируем '{query_ru}' на hh.ru..."):
-                result = hh.analyze_profession_with_verdict(query_ru)
-
-            if "error" in result:
-                st.error(result["error"])
-            else:
-                # === ВЕРДИКТ ===
-                st.subheader(f"Результаты анализа: «{result['query']}»")
-
-                cls = result['classification']
-                labels = {
-                    'RISING': '🟢 Перспективная (RISING)',
-                    'STABLE': '🔵 Стабильная (STABLE)',
-                    'DECLINING': '🟠 Угасающая (DECLINING)',
-                    'OBSOLETE': '🔴 Устаревшая (OBSOLETE)',
-                    'UNKNOWN': '⚪ Не определено (недостаточно данных)'
-                }
-
-                # Большая карточка с вердиктом
-                st.markdown(f"### {labels.get(cls, cls)}")
-                if result['avg_decay_index'] is not None:
-                    st.metric("Средний Decay Index", f"{result['avg_decay_index']:.3f}")
-                st.metric("Найдено вакансий", result['total_found'])
-                st.metric("Медианная зарплата",
-                          f"{result['median_salary']:,} ₽"
-                          if result['median_salary'] else "не указана")
-
-                st.markdown("---")
-
-                # === ТОП НАВЫКОВ С DECAY INDEX ===
-                if result['top_skills']:
-                    st.subheader("📊 Топ навыков в профессии")
-
-                    # Создаём DataFrame для таблицы
-                    skills_df = pd.DataFrame(result['top_skills'])
-                    skills_df.columns = ['Навык', 'Упоминаний', 'Decay Index']
+    @st.cache_resource
+    def load_api_client():
+        return HHApiClient()
 
 
-                    # Форматируем Decay Index
-                    def format_decay(val):
-                        if val is None:
-                            return 'N/A'
-                        if val < 0.3:
-                            return f"🟢 {val:.3f}"
-                        elif val < 0.5:
-                            return f"🔵 {val:.3f}"
-                        elif val < 0.7:
-                            return f"🟠 {val:.3f}"
-                        else:
-                            return f" {val:.3f}"
+    hh_analyzer = load_ru_analyzer()
+    api_client = load_api_client()
+
+    query_ru = st.text_input(
+        "Введите профессию или навык:",
+        placeholder="Python разработчик, Data Scientist, DevOps..."
+    )
+
+    if st.button("🔍 Анализировать профессию", type="primary") and query_ru:
+        with st.spinner(f"Запрашиваем данные от hh.ru..."):
+            vacancies_data = api_client.search_vacancies(query_ru, per_page=30)
+            result = hh_analyzer.analyze_profession_with_verdict(vacancies_data, query_ru)
+
+        if "error" in result:
+            st.error(result["error"])
+        else:
+            st.subheader(f"Результаты анализа: «{result['query']}»")
+
+            cls = result['classification']
+            labels = {
+                'RISING': '🟢 Перспективная (RISING)',
+                'STABLE': '🔵 Стабильная (STABLE)',
+                'DECLINING': '🟠 Угасающая (DECLINING)',
+                'OBSOLETE': ' Устаревшая (OBSOLETE)',
+                'UNKNOWN': '⚪ Не определено'
+            }
+
+            st.markdown(f"### {labels.get(cls, cls)}")
+
+            if result['avg_decay_index'] is not None:
+                st.metric("Средний Decay Index", f"{result['avg_decay_index']:.3f}")
+            st.metric("Найдено вакансий", result['total_found'])
+            st.metric("Медианная зарплата",
+                      f"{result['median_salary']:,} ₽"
+                      if result['median_salary'] else "не указана")
+
+            st.markdown("---")
+
+            if result['top_skills']:
+                st.subheader("📊 Топ навыков в профессии")
+
+                skills_df = pd.DataFrame(result['top_skills'])
 
 
-                    skills_df['Decay Index'] = skills_df['Decay Index'].apply(format_decay)
+                def format_decay(val):
+                    if val is None:
+                        return 'N/A'
+                    if val < 0.3:
+                        return f" {val:.3f}"
+                    elif val < 0.5:
+                        return f"🔵 {val:.3f}"
+                    elif val < 0.7:
+                        return f"🟠 {val:.3f}"
+                    else:
+                        return f"🔴 {val:.3f}"
 
-                    st.dataframe(skills_df, use_container_width=True, hide_index=True)
 
-                    # График топ навыков
-                    fig_skills = go.Figure(data=[go.Bar(
-                        x=skills_df['Упоминаний'].values,
-                        y=skills_df['Навык'].values,
-                        orientation='h',
-                        marker_color='royalblue'
-                    )])
-                    fig_skills.update_layout(
-                        title="Частота упоминания навыков в вакансиях",
-                        xaxis_title="Количество упоминаний",
-                        height=400
-                    )
-                    st.plotly_chart(fig_skills, use_container_width=True)
+                skills_df['Decay Index'] = skills_df['Decay Index'].apply(format_decay)
 
-                # === РАСПРЕДЕЛЕНИЕ ПО ОПЫТУ ===
-                if result['experience_distribution']:
-                    st.subheader("📈 Требуемый опыт работы")
-                    fig_exp = go.Figure(data=[go.Pie(
-                        labels=list(result['experience_distribution'].keys()),
-                        values=list(result['experience_distribution'].values())
-                    )])
-                    fig_exp.update_layout(
-                        title="Распределение вакансий по опыту",
-                        height=350
-                    )
-                    st.plotly_chart(fig_exp, use_container_width=True)
+                st.dataframe(skills_df, use_container_width=True, hide_index=True)
 
-                # === СПИСОК ВАКАНСИЙ ===
-                st.subheader("💼 Актуальные вакансии")
-                if result['vacancies']:
-                    df_vac = pd.DataFrame(result['vacancies'])
-                    # Форматируем зарплату
-                    if 'salary' in df_vac.columns:
-                        df_vac['salary'] = df_vac['salary'].apply(
-                            lambda x: f"{int(x):,} ₽" if pd.notna(x) else "—"
-                        )
-                    st.dataframe(df_vac, use_container_width=True, hide_index=True)
+                fig_skills = go.Figure(data=[go.Bar(
+                    x=skills_df['Упоминаний'].values,
+                    y=skills_df['Навык'].values,
+                    orientation='h',
+                    marker_color=ACCENT_COLOR
+                )])
+                fig_skills.update_layout(
+                    title="Частота упоминания навыков в вакансиях",
+                    xaxis_title="Количество упоминаний",
+                    template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                    height=400,
+                    paper_bgcolor=BG_COLOR,
+                    plot_bgcolor=CARD_COLOR,
+                    font=dict(color=TEXT_COLOR, size=12)
+                )
+                st.plotly_chart(fig_skills, use_container_width=True)
 
-        # === ОБЩИЙ ТОП НАВЫКОВ ПО ВСЕМУ ДАТАСЕТУ ===
-        with st.expander("📊 Топ навыков по всему рынку hh.ru", expanded=False):
-            top_skills = hh.get_top_skills(n=20)
-            fig_top = go.Figure(data=[go.Bar(
-                x=top_skills.values,
-                y=top_skills.index,
-                orientation='h',
-                marker_color='orange'
-            )])
-            fig_top.update_layout(
-                title="Топ-20 навыков на российском рынке",
-                xaxis_title="Количество вакансий",
-                height=500
-            )
-            st.plotly_chart(fig_top, use_container_width=True)
+            if result['experience_distribution']:
+                st.subheader("📈 Требуемый опыт работы")
+                fig_exp = go.Figure(data=[go.Pie(
+                    labels=list(result['experience_distribution'].keys()),
+                    values=list(result['experience_distribution'].values()),
+                    marker=dict(colors=[RISING_COLOR, STABLE_COLOR, DECLINING_COLOR, OBSOLETE_COLOR]),
+                    textfont=dict(color=TEXT_COLOR, size=14, weight='bold')
+                )])
+                fig_exp.update_layout(
+                    title="Распределение вакансий по опыту",
+                    template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                    height=400,
+                    paper_bgcolor=BG_COLOR,
+                    plot_bgcolor=CARD_COLOR,
+                    font=dict(color=TEXT_COLOR, size=14),
+                    legend=dict(font=dict(color=TEXT_COLOR, size=12))
+                )
+                st.plotly_chart(fig_exp, use_container_width=True)
+
+            st.subheader("💼 Актуальные вакансии")
+            if result['vacancies']:
+                df_vac = pd.DataFrame(result['vacancies'])
+                df_vac['Ссылка'] = df_vac['Ссылка'].apply(
+                    lambda x: f"[Открыть]({x})" if x else '—'
+                )
+                st.dataframe(df_vac, use_container_width=True, hide_index=True)

@@ -9,11 +9,8 @@ class HHApiClient:
     def __init__(self):
         self.base_url = "https://api.hh.ru"
 
-        # ИСПОЛЬЗУЕМ ВАШ УЖЕ ПОЛУЧЕННЫЙ РАБОЧИЙ ТОКЕН
-        self.token = "APPLL1DFQ775O2TREH0OE6SM7NJCH2QEEFL3UL9D8BG8EAOCK67N3AEJHBUUTLVC"
 
-        # ВАЖНО: Замените your_email@example.com на вашу реальную почту!
-        # Без этого hh.ru заблокирует запросы (ошибка bad_user_agent)
+        self.token = "APPLL1DFQ775O2TREH0OE6SM7NJCH2QEEFL3UL9D8BG8EAOCK67N3AEJHBUUTLVC"
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "User-Agent": "SkillDecayMonitor/1.0 (12meshae07@gmail.com)"

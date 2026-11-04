@@ -1,14 +1,13 @@
 # =============================================================================
 # Модуль: hh_analyzer.py
-# Назначение: Анализатор вакансий с hh.ru с классификацией перспективности
-#             на основе Decay Index навыков из американского датасета.
-# Входные данные: hh_vacancies_cleaned.csv + skill_decay_results.csv
-# Выходные данные: DataFrame с классификацией и статистикой по запросу.
-# Автор: Мешков Артём
+# Назначение: Анализатор вакансий от API hh.ru с классификацией перспективности.
+#             Работает с JSON-ответом от API, а не с CSV.
+# Входные данные: JSON-ответ от API hh.ru + skill_decay_results.csv
+# Выходные данные: Словарь с классификацией, статистикой и списком вакансий.
+# Автор: Оуджи буда
 # Дата: 2026
-# Версия: 0.3.0
+# Версия: 3.0
 # =============================================================================
-
 
 import re
 import pandas as pd
@@ -17,29 +16,19 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from collections import Counter
 
-from src.analytics.skill_extractor import SkillExtractor
-
 
 class HHAnalyzer:
-    """Анализатор вакансий с hh.ru с классификацией перспективности."""
+    """Анализатор вакансий от API hh.ru с классификацией перспективности."""
 
     def __init__(self):
-        """Инициализация: загружаем данные и создаём self.df."""
+        """Инициализация: загружаем Decay Index из CSV."""
         project_root = Path(__file__).resolve().parent.parent.parent
-
-        # Пути к файлам
-        self.csv_path = project_root / 'data' / 'Initial data' / 'hh_vacancies_cleaned.csv'
         self.decay_path = project_root / 'data' / 'results' / 'skill_decay_results.csv'
 
-        self.extractor = SkillExtractor()
-
-        # 1. Загружаем Decay Index для навыков
+        # Загружаем Decay Index для навыков
         self.decay_lookup = self._load_decay_index()
 
-        # 2. ЗАГРУЖАЕМ CSV — это ключевая строка, без неё self.df не существует
-        self.df = self._load_and_prepare()
-
-        print(f"✅ HHAnalyzer готов. Строк в датасете: {len(self.df)}")
+        print(f"✅ HHAnalyzer готов. Загружено {len(self.decay_lookup)} навыков с Decay Index")
 
     def _load_decay_index(self) -> Dict[str, float]:
         """Загружает Decay Index из skill_decay_results.csv."""
@@ -62,50 +51,6 @@ class HHAnalyzer:
 
         return {}
 
-    def _load_and_prepare(self) -> pd.DataFrame:
-        """Загружает CSV и подготавливает данные."""
-        if not self.csv_path.exists():
-            print(f"⚠️ Файл не найден: {self.csv_path}")
-            return pd.DataFrame()
-
-        df = pd.read_csv(self.csv_path)
-        print(f" Загружено строк: {len(df)}")
-
-        # Нормализация опыта (на случай если там ещё текст)
-        df['experience'] = df['experience'].apply(self._normalize_experience)
-
-        # Обработка зарплаты
-        if 'salary' in df.columns:
-            df['salary'] = pd.to_numeric(df['salary'], errors='coerce')
-        else:
-            df['salary'] = None
-
-        # Извлечение навыков из description
-        df['extracted_skills'] = df['description'].apply(
-            lambda x: self.extractor.extract_from_text(str(x)) if pd.notna(x) else []
-        )
-
-        return df
-
-    def _normalize_experience(self, exp) -> str:
-        """Приводит опыт к формату '3-6', '0', '6+'."""
-        if pd.isna(exp):
-            return None
-        exp = str(exp).strip()
-        if 'Без опыта' in exp or exp == '0':
-            return '0'
-        m = re.search(r'(\d+)\s*-\s*(\d+)', exp)
-        if m:
-            return f"{m.group(1)}-{m.group(2)}"
-        if 'более 6' in exp or exp == '6+':
-            return '6+'
-        m = re.search(r'от\s+(\d+)', exp)
-        if m:
-            return f"{m.group(1)}+"
-        if re.match(r'^\d+[-+]?\d*$', exp):
-            return exp
-        return None
-
     def _get_skill_decay(self, skill: str) -> Optional[float]:
         """Возвращает Decay Index для навыка."""
         skill_lower = skill.lower().strip()
@@ -121,57 +66,140 @@ class HHAnalyzer:
 
         return None
 
-    def analyze_profession_with_verdict(self, query: str) -> Dict:
-        """Анализирует профессию и выдаёт вердикт о перспективности."""
-        if self.df.empty:
-            return {"error": "Данные hh.ru не загружены"}
+    def _extract_skills_from_json(self, vacancy: Dict) -> List[str]:
+        """Извлекает навыки из JSON вакансии."""
+        skills = []
 
-        query_lower = query.lower()
+        # Из поля key_skills (если есть)
+        key_skills = vacancy.get('key_skills') or []
+        for skill in key_skills:
+            skill_name = skill.get('name', '') if skill else ''
+            if skill_name:
+                skills.append(skill_name)
 
-        # Поиск по названию и описанию
-        mask_title = self.df['job_title'].str.lower().str.contains(query_lower, na=False)
-        mask_desc = self.df['description'].str.lower().str.contains(query_lower, na=False)
-        mask_skills = self.df['extracted_skills'].apply(
-            lambda skills: any(query_lower in str(s).lower() for s in skills)
-            if isinstance(skills, list) else False
-        )
+        # Из описания (snippet) — с полной проверкой на None
+        snippet = vacancy.get('snippet')
+        if snippet and isinstance(snippet, dict):
+            requirement = snippet.get('requirement') or ''
+            responsibility = snippet.get('responsibility') or ''
+            # Можно использовать для будущего NLP-анализа
+            # description_text = requirement + " " + responsibility
 
-        filtered = self.df[mask_title | mask_desc | mask_skills]
+        return skills
 
-        if filtered.empty:
+    def analyze_profession_with_verdict(self, vacancies_data: Dict, query: str) -> Dict:
+        """
+        Анализирует JSON-ответ от API hh.ru и выдаёт вердикт о перспективности.
+
+        Args:
+            vacancies_data: JSON-ответ от API hh.ru
+            query: Поисковый запрос
+
+        Returns:
+            Словарь с результатами анализа
+        """
+        items = vacancies_data.get('items', [])
+        total_found = vacancies_data.get('found', 0)
+
+        if not items:
             return {"error": f"По запросу '{query}' ничего не найдено"}
 
         # 1. Базовая статистика
-        salary_data = filtered[filtered['salary'].notna()]['salary']
-        median_salary = int(salary_data.median()) if not salary_data.empty else None
-
-        # 2. Извлекаем все навыки
+        salaries = []
         all_skills = []
-        for skills in filtered['extracted_skills']:
-            if isinstance(skills, list):
-                all_skills.extend(skills)
+        processed_vacancies = []
+        experience_counts = {}
 
+        for vac in items:
+            # Название
+            title = vac.get('name', 'Без названия')
+
+            # Компания
+            company = vac.get('employer', {}).get('name', 'Неизвестно')
+
+            # Город
+            city = vac.get('area', {}).get('name', 'Не указан')
+
+            # Зарплата
+            salary_obj = vac.get('salary')
+            salary_from = None
+            salary_to = None
+            salary_display = '—'
+
+            if salary_obj:
+                salary_from = salary_obj.get('from')
+                salary_to = salary_obj.get('to')
+                currency = salary_obj.get('currency', 'RUR')
+
+                if salary_from and salary_to:
+                    median = (salary_from + salary_to) / 2
+                    salaries.append(median)
+                    salary_display = f"{int(salary_from):,} – {int(salary_to):,} {currency}"
+                elif salary_from:
+                    salaries.append(salary_from)
+                    salary_display = f"от {int(salary_from):,} {currency}"
+                elif salary_to:
+                    salaries.append(salary_to)
+                    salary_display = f"до {int(salary_to):,} {currency}"
+
+            # Опыт
+            experience = vac.get('experience', {}).get('name', 'Не указан')
+            experience_counts[experience] = experience_counts.get(experience, 0) + 1
+
+            # Навыки
+            skills = self._extract_skills_from_json(vac)
+            all_skills.extend(skills)
+
+            # Ссылка
+            url = vac.get('alternate_url', '')
+
+            # Метро
+            metro = '—'
+            address = vac.get('address')
+            if address and address.get('metro'):
+                metro = address['metro'].get('station_name', '—')
+
+            processed_vacancies.append({
+                'Должность': title,
+                'Компания': company,
+                'Город': city,
+                'Зарплата': salary_display,
+                'Опыт': experience,
+                'Метро': metro,
+                'Ссылка': url
+            })
+
+        # 2. Медианная зарплата
+        median_salary = None
+        if salaries:
+            salaries.sort()
+            mid = len(salaries) // 2
+            if len(salaries) % 2 == 0:
+                median_salary = (salaries[mid - 1] + salaries[mid]) / 2
+            else:
+                median_salary = salaries[mid]
+
+        # 3. Топ навыков с Decay Index
         skills_counter = Counter(all_skills)
         top_skills_raw = skills_counter.most_common(10)
 
-        # 3. Для каждого топ-навыка находим Decay Index
         top_skills_with_decay = []
         decay_values = []
 
         for skill, count in top_skills_raw:
             decay = self._get_skill_decay(skill)
             top_skills_with_decay.append({
-                'skill': skill,
-                'count': count,
-                'decay_index': decay
+                'Навык': skill,
+                'Упоминаний': count,
+                'Decay Index': decay
             })
             if decay is not None:
                 decay_values.append(decay)
 
-        # 4. Считаем средний Decay Index
+        # 4. Средний Decay Index
         avg_decay = np.mean(decay_values) if decay_values else None
 
-        # 5. Определяем вердикт
+        # 5. Вердикт
         if avg_decay is None:
             classification = 'UNKNOWN'
         elif avg_decay < 0.3:
@@ -183,29 +211,13 @@ class HHAnalyzer:
         else:
             classification = 'OBSOLETE'
 
-        # 6. Распределение по опыту
-        exp_count = filtered['experience'].value_counts().dropna()
-
-        # 7. Список вакансий
-        display_cols = ['job_title', 'company', 'experience', 'salary', 'city']
-        available_cols = [c for c in display_cols if c in filtered.columns]
-        vacancies = filtered[available_cols].head(20).to_dict('records')
-
         return {
             "query": query,
-            "total_found": len(filtered),
-            "median_salary": median_salary,
+            "total_found": total_found,
+            "median_salary": int(median_salary) if median_salary else None,
             "avg_decay_index": round(avg_decay, 3) if avg_decay else None,
             "classification": classification,
             "top_skills": top_skills_with_decay,
-            "experience_distribution": exp_count.to_dict(),
-            "vacancies": vacancies
+            "experience_distribution": experience_counts,
+            "vacancies": processed_vacancies
         }
-
-    def get_top_skills(self, n: int = 15) -> pd.Series:
-        """Возвращает топ-N навыков по всему датасету."""
-        all_skills = []
-        for skills in self.df['extracted_skills']:
-            if isinstance(skills, list):
-                all_skills.extend(skills)
-        return pd.Series(all_skills).value_counts().head(n)
