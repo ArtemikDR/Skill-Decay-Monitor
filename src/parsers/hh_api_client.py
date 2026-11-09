@@ -1,7 +1,16 @@
 """
 Модуль hh_api_client.py — клиент для отправки запросов к API hh.ru.
 """
+import os
+
 import requests
+
+try:
+    import config as local_config
+except ModuleNotFoundError as exc:
+    if exc.name != "config":
+        raise
+    local_config = None
 from typing import Dict
 
 
@@ -10,11 +19,16 @@ class HHApiClient:
         self.base_url = "https://api.hh.ru"
 
 
-        self.token = "APPLL1DFQ775O2TREH0OE6SM7NJCH2QEEFL3UL9D8BG8EAOCK67N3AEJHBUUTLVC"
-        self.headers = {
-            "Authorization": f"Bearer {self.token}",
-            "User-Agent": "SkillDecayMonitor/1.0 (12meshae07@gmail.com)"
-        }
+        self.token = os.environ.get("HH_ACCESS_TOKEN", getattr(local_config, "HH_ACCESS_TOKEN", "")).strip()
+        email = os.environ.get(
+            "USER_AGENT_EMAIL", getattr(local_config, "USER_AGENT_EMAIL", "")
+        ).strip()
+        user_agent = "SkillDecayMonitor/0.4.0"
+        if email:
+            user_agent += f" ({email})"
+        self.headers = {"User-Agent": user_agent}
+        if self.token:
+            self.headers["Authorization"] = f"Bearer {self.token}"
 
     def search_vacancies(self, query: str, area: str = "113", per_page: int = 20) -> Dict:
         """
