@@ -10,6 +10,8 @@
 # =============================================================================
 
 import re
+from html import unescape
+from src.analytics.skill_extractor import SkillExtractor
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -25,8 +27,8 @@ class HHAnalyzer:
         project_root = Path(__file__).resolve().parent.parent.parent
         self.decay_path = project_root / 'data' / 'results' / 'skill_decay_results.csv'
 
-        # Загружаем Decay Index для навыков
         self.decay_lookup = self._load_decay_index()
+        self.skill_extractor = SkillExtractor()
 
         print(f"✅ HHAnalyzer готов. Загружено {len(self.decay_lookup)} навыков с Decay Index")
 
@@ -43,7 +45,8 @@ class HHAnalyzer:
                 for _, row in df_decay.iterrows():
                     skill = str(row['skill']).strip().lower()
                     decay = float(row['decay_index'])
-                    lookup[skill] = decay
+                    if np.isfinite(decay) and 0 <= decay <= 1:
+                        lookup[skill] = decay
                 print(f"✅ Загружен Decay Index для {len(lookup)} навыков")
                 return lookup
         except Exception as e:
@@ -55,37 +58,38 @@ class HHAnalyzer:
         """Возвращает Decay Index для навыка."""
         skill_lower = skill.lower().strip()
 
-        # Прямое совпадение
         if skill_lower in self.decay_lookup:
             return self.decay_lookup[skill_lower]
-
-        # Частичное совпадение
-        for key, value in self.decay_lookup.items():
-            if skill_lower in key or key in skill_lower:
-                return value
 
         return None
 
     def _extract_skills_from_json(self, vacancy: Dict) -> List[str]:
-        """Извлекает навыки из JSON вакансии."""
-        skills = []
+        """Собирает навыки из полей вакансии без повторов внутри одной записи."""
+        skills = {}
+        known_names = {name.casefold(): name for name in self.skill_extractor.skills_dict}
 
-        # Из поля key_skills (если есть)
-        key_skills = vacancy.get('key_skills') or []
-        for skill in key_skills:
-            skill_name = skill.get('name', '') if skill else ''
-            if skill_name:
-                skills.append(skill_name)
+        def add_skill(name):
+            if not isinstance(name, str) or not name.strip():
+                return
+            name = name.strip()
+            name = known_names.get(name.casefold(), name)
+            skills.setdefault(name.casefold(), name)
 
-        # Из описания (snippet) — с полной проверкой на None
-        snippet = vacancy.get('snippet')
-        if snippet and isinstance(snippet, dict):
-            requirement = snippet.get('requirement') or ''
-            responsibility = snippet.get('responsibility') or ''
-            # Можно использовать для будущего NLP-анализа
-            # description_text = requirement + " " + responsibility
+        for skill in vacancy.get('key_skills') or []:
+            if isinstance(skill, dict):
+                add_skill(skill.get('name'))
 
-        return skills
+        snippet = vacancy.get('snippet') or {}
+        if not isinstance(snippet, dict):
+            snippet = {}
+        parts = [vacancy.get('name'), vacancy.get('description'),
+                 snippet.get('requirement'), snippet.get('responsibility')]
+        text = ' '.join(part for part in parts if isinstance(part, str))
+        text = unescape(re.sub(r'<[^>]+>', ' ', text))
+        for skill in self.skill_extractor.extract_from_text(text):
+            add_skill(skill)
+
+        return list(skills.values())
 
     def analyze_profession_with_verdict(self, vacancies_data: Dict, query: str) -> Dict:
         """
@@ -98,29 +102,28 @@ class HHAnalyzer:
         Returns:
             Словарь с результатами анализа
         """
+        if 'error' in vacancies_data:
+            return vacancies_data.copy()
+
         items = vacancies_data.get('items', [])
         total_found = vacancies_data.get('found', 0)
 
         if not items:
             return {"error": f"По запросу '{query}' ничего не найдено"}
 
-        # 1. Базовая статистика
         salaries = []
         all_skills = []
         processed_vacancies = []
         experience_counts = {}
+        vacancies_with_skills = 0
 
         for vac in items:
-            # Название
             title = vac.get('name', 'Без названия')
 
-            # Компания
-            company = vac.get('employer', {}).get('name', 'Неизвестно')
+            company = (vac.get('employer') or {}).get('name', 'Неизвестно')
 
-            # Город
-            city = vac.get('area', {}).get('name', 'Не указан')
+            city = (vac.get('area') or {}).get('name', 'Не указан')
 
-            # Зарплата
             salary_obj = vac.get('salary')
             salary_from = None
             salary_to = None
@@ -142,18 +145,16 @@ class HHAnalyzer:
                     salaries.append(salary_to)
                     salary_display = f"до {int(salary_to):,} {currency}"
 
-            # Опыт
-            experience = vac.get('experience', {}).get('name', 'Не указан')
+            experience = (vac.get('experience') or {}).get('name', 'Не указан')
             experience_counts[experience] = experience_counts.get(experience, 0) + 1
 
-            # Навыки
             skills = self._extract_skills_from_json(vac)
             all_skills.extend(skills)
+            if skills:
+                vacancies_with_skills += 1
 
-            # Ссылка
             url = vac.get('alternate_url', '')
 
-            # Метро
             metro = '—'
             address = vac.get('address')
             if address and address.get('metro'):
@@ -169,7 +170,6 @@ class HHAnalyzer:
                 'Ссылка': url
             })
 
-        # 2. Медианная зарплата
         median_salary = None
         if salaries:
             salaries.sort()
@@ -179,7 +179,6 @@ class HHAnalyzer:
             else:
                 median_salary = salaries[mid]
 
-        # 3. Топ навыков с Decay Index
         skills_counter = Counter(all_skills)
         top_skills_raw = skills_counter.most_common(10)
 
@@ -191,15 +190,14 @@ class HHAnalyzer:
             top_skills_with_decay.append({
                 'Навык': skill,
                 'Упоминаний': count,
+                'Доля вакансий, %': round(count / len(items) * 100, 1),
                 'Decay Index': decay
             })
             if decay is not None:
                 decay_values.append(decay)
 
-        # 4. Средний Decay Index
-        avg_decay = np.mean(decay_values) if decay_values else None
+        avg_decay = float(np.mean(decay_values)) if decay_values else None
 
-        # 5. Вердикт
         if avg_decay is None:
             classification = 'UNKNOWN'
         elif avg_decay < 0.3:
@@ -215,7 +213,11 @@ class HHAnalyzer:
             "query": query,
             "total_found": total_found,
             "median_salary": int(median_salary) if median_salary else None,
-            "avg_decay_index": round(avg_decay, 3) if avg_decay else None,
+            "avg_decay_index": round(avg_decay, 3) if avg_decay is not None else None,
+            "processed_count": len(items),
+            "vacancies_with_skills": vacancies_with_skills,
+            "skills_with_index": len(decay_values),
+            "top_skills_count": len(top_skills_with_decay),
             "classification": classification,
             "top_skills": top_skills_with_decay,
             "experience_distribution": experience_counts,

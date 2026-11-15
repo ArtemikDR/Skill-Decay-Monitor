@@ -15,18 +15,11 @@ from src.analytics.metrics_calculator import MetricsCalculator #рассчиты
 
 
 def main():
-    print("~" * 60) #визуал
+    print("~" * 60)
     print("SKILL DECAY MONITOR")
     print("~" * 60)
     print("\n Загрузка данных")
-    column_names = [
-        'work_year', 'experience_level', 'employment_type', 'job_title',
-        'salary', 'salary_currency', 'salary_in_usd', 'employee_residence',
-        'remote_ratio', 'company_location', 'company_size', 'experience_level_label',
-        'employment_type_label', 'work_mode', 'salary_outlier_flag', 'label',
-        'role_family', 'isco_group_hint'
-    ]
-    df = pd.read_csv('data/Initial data/ai_jobs_salaries_clean.csv', names=column_names)
+    df = pd.read_csv('data/Initial data/ai_jobs_salaries_clean.csv')
 
     # Конвертация в числовые типы
     df['salary_in_usd'] = pd.to_numeric(df['salary_in_usd'], errors='coerce')
@@ -60,3 +53,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Исходные комментарии к строкам прежней реализации.
+# print("~" * 60)
+#визуал

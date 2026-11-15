@@ -8,31 +8,23 @@ from src.analytics.metrics_calculator import MetricsCalculator
 from src.parsers.hh_api_client import HHApiClient
 from src.analytics.hh_analyzer import HHAnalyzer
 
-# =============================================================================
-# ПАЛИТРА ТЁМНОЙ ТЕМЫ "Cyber Green"
-# =============================================================================
-BG_COLOR_DARK = "#16251c"  # RGB(22, 37, 28) - тёмно-зелёный
-CARD_COLOR_DARK = "#1a2f24"  # чуть светлее для карточек
-TEXT_COLOR_DARK = "#e0f2f1"  # яркий белый для тёмной темы
-ACCENT_CYAN = "#2dd4bf"  # неоново-бирюзовый (мягкий)
-RISING_COLOR = "#34d399"  # зелёный
-STABLE_COLOR = "#60a5fa"  # синий
-DECLINING_COLOR = "#fbbf24"  # оранжевый
-OBSOLETE_COLOR = "#f87171"  # красный
+BG_COLOR_DARK = "#16251c"
+CARD_COLOR_DARK = "#1a2f24"
+TEXT_COLOR_DARK = "#e0f2f1"
+ACCENT_CYAN = "#2dd4bf"
+RISING_COLOR = "#34d399"
+STABLE_COLOR = "#60a5fa"
+DECLINING_COLOR = "#fbbf24"
+OBSOLETE_COLOR = "#f87171"
 
-# =============================================================================
-# ПАЛИТРА СВЕТЛОЙ ТЕМЫ
-# =============================================================================
 BG_COLOR_LIGHT = "#ffffff"
 CARD_COLOR_LIGHT = "#f8f9fa"
 TEXT_COLOR_LIGHT = "#212529"
 ACCENT_BLUE_LIGHT = "#0d6efd"
 
-# Инициализация состояния темы
 if 'theme' not in st.session_state:
     st.session_state.theme = 'dark'
 
-# Определяем текущую тему
 if st.session_state.theme == 'dark':
     BG_COLOR = BG_COLOR_DARK
     CARD_COLOR = CARD_COLOR_DARK
@@ -50,9 +42,6 @@ st.set_page_config(
     page_icon="📉"
 )
 
-# =============================================================================
-# CSS СТИЛИ С ТЕМБЛЕРОМ И УЛУЧШЕНИЯМИ
-# =============================================================================
 st.markdown(f"""
 <style>
     /* Основной фон */
@@ -201,9 +190,6 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# =============================================================================
-# ТЕМБЛЕР ПЕРЕКЛЮЧЕНИЯ ТЕМ
-# =============================================================================
 col_toggle1, col_toggle2 = st.columns([10, 1])
 with col_toggle2:
     theme_icon = "🌙" if st.session_state.theme == 'dark' else "☀️"
@@ -218,15 +204,12 @@ st.title(" Skill Decay Monitor")
 st.markdown("### Аналитическая платформа устаревания и роста навыков")
 
 tab_us, tab_ru = st.tabs([
-    "🇺🇸 Американский рынок (2020-2026)",
+    "🌍 Зарплатная статистика (2020–2025)",
     "🇷🇺 Российский рынок (hh.ru API)"
 ])
 
-# =============================================================================
-# ВКЛАДКА 1: АМЕРИКАНСКИЙ РЫНОК
-# =============================================================================
 with tab_us:
-    st.header("Американский рынок IT (2020–2026)")
+    st.header("Зарплатная статистика IT (2020–2025)")
 
 
     @st.cache_data
@@ -235,14 +218,8 @@ with tab_us:
             st.error(f"Файл не найден: {US_DATASET}")
             return pd.DataFrame()
 
-        column_names = [
-            'work_year', 'experience_level', 'employment_type', 'job_title',
-            'salary', 'salary_currency', 'salary_in_usd', 'employee_residence',
-            'remote_ratio', 'company_location', 'company_size',
-            'experience_level_label', 'employment_type_label', 'work_mode',
-            'salary_outlier_flag', 'label', 'role_family', 'isco_group_hint'
-        ]
-        df = pd.read_csv(US_DATASET, names=column_names, low_memory=False)
+        df = pd.read_csv(US_DATASET, low_memory=False)
+
         df['salary_in_usd'] = pd.to_numeric(df['salary_in_usd'], errors='coerce')
         df['work_year'] = pd.to_numeric(df['work_year'], errors='coerce')
         df = df.dropna(subset=['salary_in_usd'])
@@ -256,7 +233,7 @@ with tab_us:
     df_us = load_us_data()
 
     if df_us.empty:
-        st.error("Не удалось загрузить американский датасет")
+        st.error("Не удалось загрузить зарплатный датасет")
     else:
         calc_us = MetricsCalculator(df_us)
 
@@ -266,7 +243,7 @@ with tab_us:
                 all_skills_us.update(s)
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Всего вакансий", f"{len(df_us):,}")
+        col1.metric("Всего записей", f"{len(df_us):,}")
         col2.metric("Уникальных навыков", len(all_skills_us))
         col3.metric("Период",
                     f"{int(df_us['work_year'].min())}–{int(df_us['work_year'].max())}")
@@ -286,7 +263,7 @@ with tab_us:
             if matches:
                 query_us = st.selectbox("Выберите из найденных:", matches)
 
-        if st.button("🔍 Проанализировать (US)", type="primary") and query_us:
+        if st.button("🔍 Проанализировать навык", type="primary") and query_us:
             history = calc_us.get_skill_history(query_us)
 
             if "error" in history:
@@ -304,7 +281,7 @@ with tab_us:
                 c1.metric("Статус", labels.get(cls, cls))
                 c2.metric("Рост зарплаты",
                           f"{history['salary_growth_rate']:.1f}%")
-                c3.metric("Рост спроса",
+                c3.metric("Изменение числа записей",
                           f"{history['demand_velocity']:.2f}x")
                 c4.metric("Decay Index",
                           f"{history['decay_index']:.2f}")
@@ -322,15 +299,15 @@ with tab_us:
                 fig.add_trace(go.Bar(
                     x=history["years"],
                     y=history["vacancy_counts"],
-                    name="Кол-во вакансий",
+                    name="Количество записей",
                     marker_color="rgba(251, 191, 36, 0.6)",
                     yaxis="y2"
                 ))
                 fig.update_layout(
-                    title=f"Динамика навыка «{query_us}» (US)",
+                    title=f"Динамика навыка «{query_us}»",
                     xaxis=dict(title="Год", dtick=1, color=TEXT_COLOR),
                     yaxis=dict(title="Зарплата, USD", side="left", color=TEXT_COLOR),
-                    yaxis2=dict(title="Кол-во вакансий",
+                    yaxis2=dict(title="Количество записей",
                                 side="right", overlaying="y", color=TEXT_COLOR),
                     template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
                     height=450,
@@ -340,7 +317,7 @@ with tab_us:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-        with st.expander("📊 Общий рейтинг навыков (US)", expanded=False):
+        with st.expander("📊 Общий рейтинг навыков", expanded=False):
             results_us = calc_us.analyze_all_skills()
             st.dataframe(
                 results_us[[
@@ -351,9 +328,6 @@ with tab_us:
                 hide_index=True
             )
 
-# =============================================================================
-# ВКЛАДКА 2: РОССИЙСКИЙ РЫНОК (hh.ru API)
-# =============================================================================
 with tab_ru:
     st.header("🇷🇺 Российский рынок IT (hh.ru API)")
 
@@ -395,10 +369,24 @@ with tab_ru:
                 'UNKNOWN': '⚪ Не определено'
             }
 
-            st.markdown(f"### {labels.get(cls, cls)}")
+            st.markdown(f"### Справочная оценка: {labels.get(cls, cls)}")
+            st.caption(
+                "Оценка основана на исторических индексах найденных навыков. "
+                "Она не показывает изменение спроса на профессию в России."
+            )
+            st.caption(
+                f"Обработано вакансий: {result['processed_count']}. "
+                f"Навыки найдены в {result['vacancies_with_skills']} из них. "
+                f"Исторический индекс есть для {result['skills_with_index']} "
+                f"из {result['top_skills_count']} навыков в топе."
+            )
+            if result['skills_with_index'] == 0:
+                st.info("Для оценки не хватает исторических индексов найденных навыков.")
+            elif result['skills_with_index'] < result['top_skills_count']:
+                st.info("Оценка учитывает только часть навыков из топа. Остальные не имеют индекса.")
 
             if result['avg_decay_index'] is not None:
-                st.metric("Средний Decay Index", f"{result['avg_decay_index']:.3f}")
+                st.metric("Средний исторический Decay Index", f"{result['avg_decay_index']:.3f}")
             st.metric("Найдено вакансий", result['total_found'])
             st.metric("Медианная зарплата",
                       f"{result['median_salary']:,} ₽"
@@ -407,14 +395,14 @@ with tab_ru:
             st.markdown("---")
 
             if result['top_skills']:
-                st.subheader("📊 Топ навыков в профессии")
+                st.subheader("📊 Навыки в обработанных вакансиях")
 
                 skills_df = pd.DataFrame(result['top_skills'])
 
 
                 def format_decay(val):
-                    if val is None:
-                        return 'N/A'
+                    if pd.isna(val):
+                        return 'Нет данных'
                     if val < 0.3:
                         return f" {val:.3f}"
                     elif val < 0.5:
@@ -445,6 +433,9 @@ with tab_ru:
                     font=dict(color=TEXT_COLOR, size=12)
                 )
                 st.plotly_chart(fig_skills, use_container_width=True)
+
+            else:
+                st.info("В доступном тексте вакансий навыки не найдены. Попробуйте другой запрос.")
 
             if result['experience_distribution']:
                 st.subheader("📈 Требуемый опыт работы")
