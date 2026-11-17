@@ -218,7 +218,11 @@ with tab_us:
             st.error(f"Файл не найден: {US_DATASET}")
             return pd.DataFrame()
 
-        df = pd.read_csv(US_DATASET, low_memory=False)
+        try:
+            df = pd.read_csv(US_DATASET, low_memory=False)
+        except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeError):
+            st.error("Не удалось прочитать CSV. Проверьте файл данных, его кодировку и права доступа.")
+            return pd.DataFrame()
 
         df['salary_in_usd'] = pd.to_numeric(df['salary_in_usd'], errors='coerce')
         df['work_year'] = pd.to_numeric(df['work_year'], errors='coerce')

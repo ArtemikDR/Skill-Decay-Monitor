@@ -52,7 +52,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except FileNotFoundError:
+        print("Файл данных не найден. Проверьте наличие CSV и запускайте main.py из корня проекта.")
+        raise SystemExit(1)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeError):
+        print("Не удалось прочитать CSV. Проверьте содержимое и кодировку файла данных.")
+        raise SystemExit(1)
+    except PermissionError:
+        print("Нет доступа к файлу данных. Проверьте права доступа и закройте файл в других программах.")
+        raise SystemExit(1)
 
 # Исходные комментарии к строкам прежней реализации.
 # print("~" * 60)
